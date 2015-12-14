@@ -10,13 +10,19 @@ import java.util.Arrays;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.ansi.AnsiPropertySource;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertyResolver;
+import org.springframework.core.env.PropertySourcesPropertyResolver;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Controller;
 import org.springframework.util.Assert;
 import org.springframework.util.FileCopyUtils;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,8 +31,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
 import lombok.Data;
+import springfox.documentation.builders.ApiInfoBuilder;
 import springfox.documentation.builders.PathSelectors;
+import springfox.documentation.service.ApiInfo;
 import springfox.documentation.spi.DocumentationType;
 import springfox.documentation.spring.web.plugins.Docket;
 import springfox.documentation.swagger2.annotations.EnableSwagger2;
@@ -49,14 +60,26 @@ public class BootifulBannersServiceApplication {
     @Bean
     public Docket bootifulBannersApi() {
       return new Docket(DocumentationType.SWAGGER_2)
+              .apiInfo(apiInfo())
               .select()
               .paths(PathSelectors.regex("/banner"))
               .build();
+    }
+    
+    private ApiInfo apiInfo() {
+        return new ApiInfoBuilder()
+                .title("Yet Another Bootiful Banners")
+                .description("Convert images into color-coded ASCII text that can be used in your spring-boot banner.txt file.")
+                .license("Apache License Version 2.0")
+                .licenseUrl("https://raw.githubusercontent.com/joshlong/bootiful-banners/master/LICENSE.txt")
+                .version("1.0.0")
+                .build();
     }
 }
 
 //curl -F "image=@/Users/jlong/Desktop/doge.jpg" -H "Content-Type: multipart/form-data" http://bootiful-banners.cfapps.io/banners
 @RestController
+@Api("banner-generator")
 class BannerGeneratorRestController {
 
     public static final String[] MEDIA_TYPES = {
@@ -67,16 +90,22 @@ class BannerGeneratorRestController {
     @Autowired
     private BannerProperties properties;
 
+    @Autowired
+    private Environment env;
+
     @RequestMapping(
             value = "/banner",
             method = RequestMethod.POST,
             produces = MediaType.TEXT_PLAIN_VALUE
     )
-    ResponseEntity<String> banner(@RequestParam("image") MultipartFile multipartFile,
-            @RequestParam(required = false) Integer maxWidth,
-            @RequestParam(required = false) Double aspectRatio,
-            @RequestParam(required = false) Boolean invert) throws Exception {
+    @ApiOperation("Generate a banner from an image")
+    ResponseEntity<String> banner(@ApiParam(value = "the image to convert", required = true) @RequestParam("image") MultipartFile multipartFile,
+            @ApiParam("maximum width in characters of banner (default is 72)") @RequestParam(required = false) Integer maxWidth,
+            @ApiParam("correction to makes sure height is correct to accomodate the fact that fonts are taller than they are wide. (default is 0.5)") @RequestParam(required = false) Double aspectRatio,
+            @ApiParam("whether to invert image for a dark background. (default is false)") @RequestParam(required = false) Boolean invert,
+            @ApiParam("wheter to ouput the encoded ansi string instead of the text banner (default is false)") @RequestParam(defaultValue = "false") boolean ansiOutput) throws Exception {
         File image = null;
+        
         try {
             image = this.imageFileFrom(multipartFile);
             ImageBanner imageBanner = new ImageBanner(image);
@@ -92,6 +121,13 @@ class BannerGeneratorRestController {
             }
 
             String banner = imageBanner.printBanner(maxWidth, aspectRatio, invert);
+
+            if(ansiOutput == true) {
+                MutablePropertySources sources = new MutablePropertySources();
+                sources.addFirst(new AnsiPropertySource("ansi", true));
+                PropertyResolver ansiResolver = new PropertySourcesPropertyResolver(sources);
+                banner = ansiResolver.resolvePlaceholders(banner);
+            }
 
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_PLAIN)
@@ -129,4 +165,13 @@ class BannerProperties {
 
     private boolean invert;
 
+}
+
+@Controller
+class HomeController {
+
+    @RequestMapping("/")
+    public String index() {
+        return "redirect:swagger-ui.html";
+    }
 }
